@@ -14,34 +14,41 @@ pipeline {
     stages {
         stage('Checkout') {
             steps {
-                echo '✅ Checkout stage started'
-                // Uncomment this when you want to checkout project source
+                echo '✅ Checkout stage started...'
                 // git branch: 'main', url: 'https://github.com/Akash-HC/Jenkins-reference.git'
+                sh 'echo "Project checkout placeholder (uncomment Git step to activate)"'
             }
         }
 
         stage('Build and Test') {
             steps {
-                echo '✅ Building and testing the project'
+                echo '🔧 Building and testing the project...'
                 sh 'ls -ltr'
                 sh 'cd java-maven-sonar-argocd-helm-k8s/spring-boot-app && mvn clean package'
             }
         }
 
         stage('Build and Push Docker Image') {
-            environment {
-                REGISTRY_CREDENTIALS = credentials('docker-hub-creds')
-            }
             steps {
-                echo '✅ Building Docker image and pushing to Docker Hub'
-                script {
-                    sh '''
-                        cd java-maven-sonar-argocd-helm-k8s/spring-boot-app
-                        docker build -t ${DOCKER_IMAGE} .
-                    '''
-                    def dockerImage = docker.image("${DOCKER_IMAGE}")
-                    docker.withRegistry('https://index.docker.io/v1/', "docker-hub-creds") {
-                        dockerImage.push()
+                echo "🐳 Building Docker image: ${DOCKER_IMAGE}"
+
+                withCredentials([usernamePassword(
+                    credentialsId: 'docker-hub-creds',
+                    usernameVariable: 'DOCKER_USER',
+                    passwordVariable: 'DOCKER_PASS'
+                )]) {
+                    script {
+                        sh '''
+                            cd java-maven-sonar-argocd-helm-k8s/spring-boot-app
+                            docker build -t ${DOCKER_IMAGE} .
+                        '''
+
+                        echo "🔐 Logging in to Docker Hub and pushing image..."
+                        sh '''
+                            echo "$DOCKER_PASS" | docker login -u "$DOCKER_USER" --password-stdin
+                            docker push ${DOCKER_IMAGE}
+                            docker logout
+                        '''
                     }
                 }
             }
@@ -49,32 +56,38 @@ pipeline {
 
         stage('Update Kubernetes Manifests') {
             steps {
-                echo '✅ Updating deployment.yaml in Git repo'
+                echo '📦 Cloning ArgoCD repo and updating deployment manifest...'
+
                 withCredentials([usernamePassword(
                     credentialsId: 'git-creds-id',
                     usernameVariable: 'GIT_USERNAME',
                     passwordVariable: 'GIT_PASSWORD'
                 )]) {
-                    sh '''
-                        rm -rf argo-repo
-                        git clone https://${GIT_USERNAME}:${GIT_PASSWORD}@github.com/Akash-HC/ArgoCD-Test.git argo-repo
-                    '''
-                }
-
-                dir('argo-repo') {
                     script {
-                        def content = readFile(file: "${env.YAML_FILE}")
-                        def updated = content.replaceAll("image: .*", "image: ${env.DOCKER_IMAGE}")
-                        writeFile(file: "${env.YAML_FILE}", text: updated)
+                        // Clean up and clone Argo repo
+                        if (fileExists('argo-repo')) {
+                            sh 'rm -rf argo-repo'
+                        }
+                        sh '''
+                            git clone https://${GIT_USERNAME}:${GIT_PASSWORD}@github.com/Akash-HC/ArgoCD-Test.git argo-repo
+                        '''
                     }
 
-                    sh '''
-                        git config user.email "akashchalkodu@gmail.com"
-                        git config user.name "Akash-HC"
-                        git add ${YAML_FILE}
-                        git diff --cached --quiet || git commit -m "Update image to ${DOCKER_IMAGE}"
-                        git push origin main
-                    '''
+                    dir('argo-repo') {
+                        script {
+                            def content = readFile(file: "${env.YAML_FILE}")
+                            def updated = content.replaceAll("image: .*", "image: ${env.DOCKER_IMAGE}")
+                            writeFile(file: "${env.YAML_FILE}", text: updated)
+
+                            sh '''
+                                git config user.email "akashchalkodu@gmail.com"
+                                git config user.name "Akash-HC"
+                                git add ${YAML_FILE}
+                                git diff --cached --quiet || git commit -m "Update image to ${DOCKER_IMAGE}"
+                                git push origin main
+                            '''
+                        }
+                    }
                 }
             }
         }
@@ -82,7 +95,7 @@ pipeline {
 
     post {
         failure {
-            echo "❌ Pipeline failed. Please check the console output."
+            echo "❌ Pipeline failed. Please check the logs for issues."
         }
         success {
             echo "✅ Pipeline completed successfully! Image pushed: ${DOCKER_IMAGE}"
