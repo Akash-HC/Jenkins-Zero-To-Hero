@@ -33,7 +33,7 @@ pipeline {
                 echo "🐳 Building Docker image: ${DOCKER_IMAGE}"
 
                 withCredentials([usernamePassword(
-                    credentialsId: 'docker-hub-creds',
+                    credentialsId: 'docker-hub-creds-new',
                     usernameVariable: 'DOCKER_USER',
                     passwordVariable: 'DOCKER_PASS'
                 )]) {
